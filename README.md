@@ -12,7 +12,7 @@ This repository is intended for **public GitHub hosting** with runtime secrets k
 
 - Public source repository
 - Keep `config.env` and live secrets out of Git
-- Attribution to `kiranvenom1209` must be preserved when redistributing substantial portions
+- Attribution to `Kiran Karthikeyan Achari` must be preserved when redistributing substantial portions
 - Linked to the wider **Vœrynth OS** project
 - Sanitized for source control without checked-in secrets
 
@@ -498,4 +498,4 @@ If `bash` is available locally, you can also syntax-check the deploy script:
 
 ## License
 
-This project is published with the MIT License. If you reuse substantial portions of the code, preserve attribution to `kiranvenom1209` by keeping the copyright and license notice.
+This project is published with the MIT License. If you reuse substantial portions of the code, preserve attribution to `Kiran Karthikeyan Achari` by keeping the copyright and license notice.
