@@ -1,6 +1,58 @@
 #!/usr/bin/env python3
 
 import os
+from pathlib import Path
+
+
+def _is_truthy(value) -> bool:
+    return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _iter_local_config_paths():
+    seen = set()
+    for path in (Path(__file__).resolve().parent / "config.env", Path.cwd() / "config.env"):
+        key = str(path.absolute())
+        if key not in seen:
+            seen.add(key)
+            yield path
+
+
+def _parse_env_assignment(line: str):
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    if stripped.startswith("export "):
+        stripped = stripped[7:].lstrip()
+    if "=" not in stripped:
+        return None
+    name, value = stripped.split("=", 1)
+    name = name.strip()
+    if not name:
+        return None
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return name, value
+
+
+def _load_local_config() -> None:
+    if _is_truthy(os.getenv("HA_WATCHDOG_DISABLE_LOCAL_CONFIG")):
+        return
+    for path in _iter_local_config_paths():
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            continue
+        for line in lines:
+            parsed = _parse_env_assignment(line)
+            if parsed is None:
+                continue
+            name, value = parsed
+            os.environ.setdefault(name, value)
+        return
+
+
+_load_local_config()
 
 
 def _env_str(name: str, default: str = "") -> str:
@@ -65,6 +117,7 @@ TUYA_LOCAL_KEY = _env_str("TUYA_LOCAL_KEY")
 TUYA_VERSION = _env_float("TUYA_VERSION", 3.4)
 HA_SSH_USER = _env_str("HA_SSH_USER", "ha")
 HA_SSH_PORT = _env_int("HA_SSH_PORT", 22)
+HA_SSH_HOST_KEY = _env_str("HA_SSH_HOST_KEY")
 BACKUP_PASS = _env_str("BACKUP_PASS")
 PREFERRED_RESTORE_LOCATION = _env_str("PREFERRED_RESTORE_LOCATION", "Local_NAS")
 

@@ -23,6 +23,7 @@ from runtime_config import (
     HA_CORE_URL,
     HA_HOST,
     HA_OBSERVER_URL,
+    HA_SSH_HOST_KEY,
     HA_SSH_PORT,
     HA_SSH_USER,
     HARD_FAILURE_THRESHOLD,
@@ -159,6 +160,53 @@ def _run_ha_cli_json_via_ssh(ssh, cli_command: str, description: str):
     if error_output:
         logger.warning(f"Deep SSH Investigation returned no {description} JSON: {error_output}")
     return None
+
+def _parse_pinned_host_key(host_key_value: str):
+    """Parse a pinned SSH host key from config.
+
+    Accepts either a full known_hosts line or a bare `<key-type> <base64-key>` entry.
+    """
+    normalized = (host_key_value or "").strip()
+    if not normalized:
+        raise RuntimeError(
+            "Missing required configuration: HA_SSH_HOST_KEY. "
+            "Set the Home Assistant SSH server public host key in the environment or config.env."
+        )
+
+    entry = paramiko.hostkeys.HostKeyEntry.from_line(normalized)
+    if entry is None:
+        entry = paramiko.hostkeys.HostKeyEntry.from_line(f"{HA_HOST} {normalized}")
+    if entry is None or getattr(entry, "key", None) is None:
+        raise RuntimeError(
+            "Invalid HA_SSH_HOST_KEY. Provide either a full known_hosts entry or "
+            "'<key-type> <base64-key>'."
+        )
+    return entry.key
+
+class _PinnedHostKeyPolicy:
+    """Paramiko-compatible policy that accepts only the configured host key."""
+
+    def __init__(self, expected_key):
+        self.expected_key = expected_key
+
+    def missing_host_key(self, client, hostname, key):
+        if key.get_name() != self.expected_key.get_name() or key.asbytes() != self.expected_key.asbytes():
+            raise RuntimeError(f"Pinned SSH host key mismatch for {hostname}")
+        client.get_host_keys().add(hostname, key.get_name(), key)
+
+def _connect_ha_ssh_client(timeout: int):
+    """Open an SSH session to HA using pinned host-key verification."""
+    expected_key = _parse_pinned_host_key(HA_SSH_HOST_KEY)
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(_PinnedHostKeyPolicy(expected_key))
+    ssh.connect(
+        HA_HOST,
+        port=HA_SSH_PORT,
+        username=HA_SSH_USER,
+        timeout=timeout,
+    )
+    return ssh
 
 def _iter_jobs(jobs):
     """Yield Supervisor jobs recursively so nested child jobs can be inspected."""
@@ -324,16 +372,10 @@ def get_core_state_via_ssh():
       - "unknown" when the SSH probe succeeds but cannot classify safely
       - "dead" if the SSH/host path is unavailable
     """
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh = None
 
     try:
-        ssh.connect(
-            HA_HOST,
-            port=HA_SSH_PORT,
-            username=HA_SSH_USER,
-            timeout=SSH_INVESTIGATION_TIMEOUT,
-        )
+        ssh = _connect_ha_ssh_client(timeout=SSH_INVESTIGATION_TIMEOUT)
         supervisor_info = _run_ha_cli_json_via_ssh(
             ssh,
             "ha info --raw-json",
@@ -361,11 +403,15 @@ def get_core_state_via_ssh():
         if supervisor_state == "running" and jobs_info is not None:
             return "stopped"
         return "unknown"
+    except RuntimeError as exc:
+        logger.error(f"Deep SSH Investigation unavailable: {exc}")
+        return "unknown"
     except Exception as exc:
         logger.warning(f"Deep SSH Investigation failed. Host OS appears dead: {exc}")
         return "dead"
     finally:
-        ssh.close()
+        if ssh is not None:
+            ssh.close()
 
 def decide_core_failure_action(core_internal_state: str) -> str:
     """Map an SSH-reported Core state to the watchdog action to take."""
@@ -436,12 +482,11 @@ def trigger_ssh_backup_restore():
         logger.error(f"SSH backup restore aborted: {exc}")
         return False
 
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh = None
 
     logger.info("Initiating SSH connection to trigger HA backup restore...")
     try:
-        ssh.connect(HA_HOST, port=HA_SSH_PORT, username=HA_SSH_USER, timeout=10)
+        ssh = _connect_ha_ssh_client(timeout=10)
         backups_info = _run_ha_cli_json_via_ssh(
             ssh,
             "ha backups list --raw-json",
@@ -472,13 +517,17 @@ def trigger_ssh_backup_restore():
             f"Error: {stderr.read().decode().strip()}"
         )
         return False
+    except RuntimeError as exc:
+        logger.error(f"SSH backup restore aborted: {exc}")
+        return False
     except Exception as exc:
         logger.error(
             f"Failed to connect via SSH or execute restore. OS might be completely dead: {exc}"
         )
         return False
     finally:
-        ssh.close()
+        if ssh is not None:
+            ssh.close()
 
 def verify_post_reboot_and_restore_if_needed(consecutive_reboots: int):
     """After a power cycle, verify Core status and apply the two-strike restore rule."""

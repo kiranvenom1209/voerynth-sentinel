@@ -1,31 +1,24 @@
-Vœrynth Proprietary Source License
+MIT License
 
-Copyright (c) 2026 Vœrynth.
-All rights reserved.
+Copyright (c) 2026 kiranvenom1209
 
-This repository, including all source code, documentation, assets, and related materials,
-is proprietary and confidential. It is provided only for authorized internal use in
-connection with Vœrynth Sentinel and the broader Vœrynth OS project.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-Unless you have prior written permission from Vœrynth, you may not:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-1. use this repository for any external or public purpose;
-2. copy, reproduce, modify, adapt, translate, or create derivative works from it;
-3. distribute, publish, sublicense, sell, lease, lend, disclose, or otherwise make it
-   available to any third party;
-4. remove or alter copyright, attribution, confidentiality, or proprietary notices; or
-5. use any part of this repository to build or support a competing product or service.
+If you use this code in a project, preserve the attribution to kiranvenom1209
+in the included copyright and license notice.
 
-No patent, trademark, copyright, trade secret, or other intellectual property license is
-granted or implied except the limited right to access and use this repository internally
-when expressly authorized by Vœrynth.
-
-You are responsible for keeping all credentials, deployment artifacts, environment files,
-and generated logs out of public distribution.
-
-THE REPOSITORY IS PROVIDED "AS IS", WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
-
-To request permission for any use outside authorized internal Vœrynth work, obtain prior
-written approval from the repository owner.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

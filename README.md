@@ -8,12 +8,13 @@ This is not just a ping checker. It is a layered recovery system with state awar
 
 ## Repository status
 
-This repository is intended for **private GitHub hosting only**.
+This repository is intended for **public GitHub hosting** with runtime secrets kept local-only.
 
-- Proprietary / not open source
-- No public redistribution rights are granted
+- Public source repository
+- Keep `config.env` and live secrets out of Git
+- Attribution to `kiranvenom1209` must be preserved when redistributing substantial portions
 - Linked to the wider **Vœrynth OS** project
-- Sanitized for private source control without checked-in secrets
+- Sanitized for source control without checked-in secrets
 
 See `LICENSE` for the governing terms.
 
@@ -295,7 +296,7 @@ The dashboard is meant to answer, at a glance:
 
 ## Configuration model
 
-The repository stores **no live secrets** in source files. Runtime values come from environment variables or a private `config.env` file loaded by systemd.
+The repository stores **no live secrets** in source files. Runtime values come from environment variables or a private `config.env` file loaded by systemd or directly by the Python runtime loader.
 
 ### Configuration file workflow
 
@@ -311,6 +312,7 @@ The repository stores **no live secrets** in source files. Runtime values come f
 | `HA_HOST` | Yes | `homeassistant.local` | Hostname/IP of the protected Home Assistant machine |
 | `HA_SSH_USER` | No | `ha` | SSH username for the Home Assistant SSH add-on |
 | `HA_SSH_PORT` | No | `22` | SSH port used for deep investigation and restore |
+| `HA_SSH_HOST_KEY` | Yes for SSH features | — | Pinned Home Assistant SSH server host key; accepts a full `known_hosts` line or `<key-type> <base64-key>` |
 | `TUYA_DEVICE_ID` | Yes | — | Tuya device identifier for the smart plug |
 | `TUYA_DEVICE_IP` | Yes | — | Smart plug IP address |
 | `TUYA_LOCAL_KEY` | Yes | — | Tuya local API key |
@@ -350,9 +352,10 @@ Before deployment, make sure:
 - the Raspberry Pi can reach the Home Assistant host over the network
 - the Pi can reach the Tuya smart plug locally
 - SSH key auth to the Home Assistant SSH add-on works
+- the HA SSH server host key has been pinned in `HA_SSH_HOST_KEY`
 - the HA add-on accepts `bash -l -c` based command execution
 - the target host is configured to power back on after AC loss
-- `config.env` has been filled with real values on the Pi or will be seeded and edited there
+- `config.env` has been filled with real values locally and can be synced to the Pi during deploy, or will be seeded and edited there
 
 ### Deploy script usage
 
@@ -360,14 +363,14 @@ Before deployment, make sure:
 
 Examples:
 
-- `./deploy_to_pi.sh 10.0.0.25 watchdog`
-- `PI_HOST=watchdog-pi.local PI_USER=watchdog ./deploy_to_pi.sh`
+- `./deploy_to_pi.sh 10.0.0.25 hawatchdog`
+- `PI_HOST=watchdog-pi.local PI_USER=hawatchdog ./deploy_to_pi.sh`
 
 ### What `deploy_to_pi.sh` does
 
 1. Creates the install directory and log directory on the Pi
 2. Copies application code, assets, `README.md`, `LICENSE`, and `config.env.example`
-3. Excludes `config.env`, `logs/`, `__pycache__/`, and `*.pyc`
+3. Also copies local `config.env` when it exists, while still excluding `logs/`, `__pycache__/`, and `*.pyc`
 4. Templates the systemd units with the chosen user and install path
 5. Seeds `config.env` from `config.env.example` if no config file exists yet
 6. Installs Python dependencies (`requests`, `tinytuya`, `paramiko`)
@@ -451,7 +454,7 @@ This matters because Sentinel’s most important behavior lives in policy and ed
 
 ## Safety and privacy posture
 
-This repository has been prepared for private hosting with runtime secrets removed from tracked source files.
+This repository has been prepared for public hosting with runtime secrets removed from tracked source files.
 
 ### Git hygiene
 
@@ -495,4 +498,4 @@ If `bash` is available locally, you can also syntax-check the deploy script:
 
 ## License
 
-This project is proprietary and part of the Vœrynth OS ecosystem. Use, copying, modification, and distribution are restricted by `LICENSE`.
+This project is published with the MIT License. If you reuse substantial portions of the code, preserve attribution to `kiranvenom1209` by keeping the copyright and license notice.

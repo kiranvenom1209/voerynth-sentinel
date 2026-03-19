@@ -1,7 +1,11 @@
+import os
 import json
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+os.environ.setdefault("HA_WATCHDOG_DISABLE_LOCAL_CONFIG", "1")
 
 sys.modules.setdefault("paramiko", MagicMock())
 sys.modules.setdefault("tinytuya", MagicMock())
@@ -141,24 +145,19 @@ class GetCoreStateViaSshTests(unittest.TestCase):
         stderr.read.return_value = stderr_text.encode()
         return (MagicMock(), stdout, stderr)
 
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
-    def test_returns_starting_when_supervisor_is_setting_up(self, mock_ssh_client, mock_policy):
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_returns_starting_when_supervisor_is_setting_up(self, mock_connect_ssh):
         ssh = MagicMock()
         ssh.exec_command.return_value = self._exec_result({"data": {"state": "setup"}})
-        mock_ssh_client.return_value = ssh
+        mock_connect_ssh.return_value = ssh
 
         self.assertEqual(ha_watchdog.get_core_state_via_ssh(), "starting")
-        ssh.connect.assert_called_once_with(
-            ha_watchdog.HA_HOST,
-            port=ha_watchdog.HA_SSH_PORT,
-            username=ha_watchdog.HA_SSH_USER,
+        mock_connect_ssh.assert_called_once_with(
             timeout=ha_watchdog.SSH_INVESTIGATION_TIMEOUT,
         )
 
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
-    def test_returns_starting_for_active_nested_core_start_job(self, mock_ssh_client, mock_policy):
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_returns_starting_for_active_nested_core_start_job(self, mock_connect_ssh):
         ssh = MagicMock()
         ssh.exec_command.side_effect = [
             self._exec_result({"data": {"state": "running"}}),
@@ -186,13 +185,12 @@ class GetCoreStateViaSshTests(unittest.TestCase):
                 }
             ),
         ]
-        mock_ssh_client.return_value = ssh
+        mock_connect_ssh.return_value = ssh
 
         self.assertEqual(ha_watchdog.get_core_state_via_ssh(), "starting")
 
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
-    def test_returns_rebuilding_when_restore_job_is_active(self, mock_ssh_client, mock_policy):
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_returns_rebuilding_when_restore_job_is_active(self, mock_connect_ssh):
         ssh = MagicMock()
         ssh.exec_command.side_effect = [
             self._exec_result({"data": {"state": "running"}}),
@@ -212,13 +210,12 @@ class GetCoreStateViaSshTests(unittest.TestCase):
                 }
             ),
         ]
-        mock_ssh_client.return_value = ssh
+        mock_connect_ssh.return_value = ssh
 
         self.assertEqual(ha_watchdog.get_core_state_via_ssh(), "rebuilding")
 
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
-    def test_returns_updating_when_update_job_is_active(self, mock_ssh_client, mock_policy):
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_returns_updating_when_update_job_is_active(self, mock_connect_ssh):
         ssh = MagicMock()
         ssh.exec_command.side_effect = [
             self._exec_result({"data": {"state": "running"}}),
@@ -238,66 +235,117 @@ class GetCoreStateViaSshTests(unittest.TestCase):
                 }
             ),
         ]
-        mock_ssh_client.return_value = ssh
+        mock_connect_ssh.return_value = ssh
 
         self.assertEqual(ha_watchdog.get_core_state_via_ssh(), "updating")
 
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
-    def test_returns_stopped_when_supervisor_running_and_no_active_jobs(self, mock_ssh_client, mock_policy):
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_returns_stopped_when_supervisor_running_and_no_active_jobs(self, mock_connect_ssh):
         ssh = MagicMock()
         ssh.exec_command.side_effect = [
             self._exec_result({"data": {"state": "running"}}),
             self._exec_result({"data": {"jobs": []}}),
         ]
-        mock_ssh_client.return_value = ssh
+        mock_connect_ssh.return_value = ssh
 
         self.assertEqual(ha_watchdog.get_core_state_via_ssh(), "stopped")
 
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
-    def test_returns_unknown_when_supervisor_and_jobs_cannot_classify(self, mock_ssh_client, mock_policy):
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_returns_unknown_when_supervisor_and_jobs_cannot_classify(self, mock_connect_ssh):
         ssh = MagicMock()
         ssh.exec_command.side_effect = [
             self._exec_result({"data": {"version": "2026.3.1"}}),
             self._exec_result({"data": {"jobs": []}}),
         ]
-        mock_ssh_client.return_value = ssh
+        mock_connect_ssh.return_value = ssh
 
         self.assertEqual(ha_watchdog.get_core_state_via_ssh(), "unknown")
 
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
-    def test_returns_unknown_when_json_is_invalid(self, mock_ssh_client, mock_policy):
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_returns_unknown_when_json_is_invalid(self, mock_connect_ssh):
         ssh = MagicMock()
         ssh.exec_command.side_effect = [
             self._exec_result(b"not-json"),
             self._exec_result({"data": {"jobs": []}}),
         ]
-        mock_ssh_client.return_value = ssh
+        mock_connect_ssh.return_value = ssh
 
         self.assertEqual(ha_watchdog.get_core_state_via_ssh(), "unknown")
 
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
-    def test_returns_unknown_when_json_missing(self, mock_ssh_client, mock_policy):
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_returns_unknown_when_json_missing(self, mock_connect_ssh):
         ssh = MagicMock()
         ssh.exec_command.side_effect = [
             self._exec_result(None, stderr_text="some stderr"),
             self._exec_result({"data": {"jobs": []}}),
         ]
-        mock_ssh_client.return_value = ssh
+        mock_connect_ssh.return_value = ssh
 
         self.assertEqual(ha_watchdog.get_core_state_via_ssh(), "unknown")
 
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
-    def test_returns_dead_when_ssh_fails(self, mock_ssh_client, mock_policy):
-        ssh = MagicMock()
-        ssh.connect.side_effect = RuntimeError("boom")
-        mock_ssh_client.return_value = ssh
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_returns_dead_when_ssh_fails(self, mock_connect_ssh):
+        mock_connect_ssh.side_effect = Exception("boom")
 
         self.assertEqual(ha_watchdog.get_core_state_via_ssh(), "dead")
+
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_returns_unknown_when_host_key_validation_cannot_start(self, mock_connect_ssh):
+        mock_connect_ssh.side_effect = RuntimeError("Missing required configuration: HA_SSH_HOST_KEY")
+
+        self.assertEqual(ha_watchdog.get_core_state_via_ssh(), "unknown")
+
+
+class PinnedSshHostKeyTests(unittest.TestCase):
+    @patch("ha_watchdog.paramiko.SSHClient")
+    @patch("ha_watchdog.paramiko.hostkeys.HostKeyEntry.from_line")
+    def test_connect_ha_ssh_client_uses_pinned_host_key_policy(self, mock_from_line, mock_ssh_client):
+        ssh = MagicMock()
+        host_keys = MagicMock()
+        ssh.get_host_keys.return_value = host_keys
+        mock_ssh_client.return_value = ssh
+
+        expected_key = MagicMock()
+        expected_key.get_name.return_value = "ssh-ed25519"
+        expected_key.asbytes.return_value = b"expected-key"
+        mock_from_line.side_effect = [None, SimpleNamespace(key=expected_key)]
+
+        with patch.object(
+            ha_watchdog,
+            "HA_SSH_HOST_KEY",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestPinnedKey",
+        ):
+            returned_ssh = ha_watchdog._connect_ha_ssh_client(timeout=11)
+
+        self.assertIs(returned_ssh, ssh)
+        mock_from_line.assert_any_call(
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestPinnedKey"
+        )
+        mock_from_line.assert_any_call(
+            f"{ha_watchdog.HA_HOST} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestPinnedKey"
+        )
+        ssh.connect.assert_called_once_with(
+            ha_watchdog.HA_HOST,
+            port=ha_watchdog.HA_SSH_PORT,
+            username=ha_watchdog.HA_SSH_USER,
+            timeout=11,
+        )
+
+        policy = ssh.set_missing_host_key_policy.call_args.args[0]
+        actual_key = MagicMock()
+        actual_key.get_name.return_value = "ssh-ed25519"
+        actual_key.asbytes.return_value = b"expected-key"
+
+        policy.missing_host_key(ssh, ha_watchdog.HA_HOST, actual_key)
+        host_keys.add.assert_called_once_with(ha_watchdog.HA_HOST, "ssh-ed25519", actual_key)
+
+    @patch("ha_watchdog.paramiko.hostkeys.HostKeyEntry.from_line", return_value=None)
+    def test_connect_ha_ssh_client_rejects_invalid_host_key_config(self, mock_from_line):
+        with patch.object(ha_watchdog, "HA_SSH_HOST_KEY", "not-a-valid-key"):
+            with self.assertRaises(RuntimeError):
+                ha_watchdog._connect_ha_ssh_client(timeout=5)
+
+        self.assertEqual(mock_from_line.call_count, 2)
 
 
 class RestoreBackupSelectionTests(unittest.TestCase):
@@ -431,12 +479,10 @@ class RestoreBackupSelectionTests(unittest.TestCase):
 
 class TriggerSshBackupRestoreTests(unittest.TestCase):
     @patch("ha_watchdog._run_ha_cli_json_via_ssh")
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
+    @patch("ha_watchdog._connect_ha_ssh_client")
     def test_trigger_restore_uses_selected_homeassistant_backup_slug(
         self,
-        mock_ssh_client,
-        mock_policy,
+        mock_connect_ssh,
         mock_run_json,
     ):
         ssh = MagicMock()
@@ -445,7 +491,7 @@ class TriggerSshBackupRestoreTests(unittest.TestCase):
         stdout.channel.recv_exit_status.return_value = 0
         stderr.read.return_value = b""
         ssh.exec_command.return_value = (MagicMock(), stdout, stderr)
-        mock_ssh_client.return_value = ssh
+        mock_connect_ssh.return_value = ssh
         mock_run_json.return_value = {
             "data": {
                 "backups": [
@@ -487,19 +533,18 @@ class TriggerSshBackupRestoreTests(unittest.TestCase):
             f"ha backups restore restore-me --password {ha_watchdog.shlex.quote('test-backup-password')}"
         )
         expected_restore_cmd = f"bash -l -c {ha_watchdog.shlex.quote(expected_inner_command)}"
+        mock_connect_ssh.assert_called_once_with(timeout=10)
         ssh.exec_command.assert_called_once_with(expected_restore_cmd)
 
     @patch("ha_watchdog._run_ha_cli_json_via_ssh")
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
+    @patch("ha_watchdog._connect_ha_ssh_client")
     def test_trigger_restore_fails_when_no_homeassistant_backup_is_available(
         self,
-        mock_ssh_client,
-        mock_policy,
+        mock_connect_ssh,
         mock_run_json,
     ):
         ssh = MagicMock()
-        mock_ssh_client.return_value = ssh
+        mock_connect_ssh.return_value = ssh
         mock_run_json.return_value = {
             "data": {
                 "backups": [
@@ -517,17 +562,22 @@ class TriggerSshBackupRestoreTests(unittest.TestCase):
 
         self.assertFalse(ha_watchdog.trigger_ssh_backup_restore())
 
-    @patch("ha_watchdog.paramiko.AutoAddPolicy")
-    @patch("ha_watchdog.paramiko.SSHClient")
+    @patch("ha_watchdog._connect_ha_ssh_client")
     def test_trigger_restore_fails_when_backup_password_is_missing(
         self,
-        mock_ssh_client,
-        mock_policy,
+        mock_connect_ssh,
     ):
         with patch.object(ha_watchdog, "BACKUP_PASS", ""):
             self.assertFalse(ha_watchdog.trigger_ssh_backup_restore())
 
-        mock_ssh_client.assert_not_called()
+        mock_connect_ssh.assert_not_called()
+
+    @patch("ha_watchdog._connect_ha_ssh_client")
+    def test_trigger_restore_fails_when_host_key_validation_cannot_start(self, mock_connect_ssh):
+        mock_connect_ssh.side_effect = RuntimeError("Missing required configuration: HA_SSH_HOST_KEY")
+
+        with patch.object(ha_watchdog, "BACKUP_PASS", "test-backup-password"):
+            self.assertFalse(ha_watchdog.trigger_ssh_backup_restore())
 
 
 if __name__ == "__main__":

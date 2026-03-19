@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 import json
 import re
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -61,6 +62,7 @@ SERVER_START_TS = time.time()
 
 # Soft-failure timestamp tracked across requests (set when Core goes offline w/ Observer alive)
 _core_offline_since: float = 0.0
+_core_offline_since_lock = threading.Lock()
 
 HTML = r'''<!doctype html>
 <html lang="en">
@@ -1025,12 +1027,13 @@ class Handler(BaseHTTPRequestHandler):
             stats["in_boot_grace"] = False
 
         # Track how long Core has been offline while Observer is alive (soft failure)
-        if not core["ok"] and observer["ok"]:
-            if _core_offline_since == 0.0:
-                _core_offline_since = now_ts
-        else:
-            _core_offline_since = 0.0
-        soft_elapsed = (now_ts - _core_offline_since) if _core_offline_since > 0.0 else 0.0
+        with _core_offline_since_lock:
+            if not core["ok"] and observer["ok"]:
+                if _core_offline_since == 0.0:
+                    _core_offline_since = now_ts
+            else:
+                _core_offline_since = 0.0
+            soft_elapsed = (now_ts - _core_offline_since) if _core_offline_since > 0.0 else 0.0
         soft_failure_info = {
             "active":    soft_elapsed >= SOFT_FAILURE_WARN_AT,
             "elapsed":   round(soft_elapsed, 1),
