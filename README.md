@@ -18,6 +18,30 @@ This repository is intended for **public GitHub hosting** with runtime secrets k
 
 See `LICENSE` for the governing terms.
 
+## Quickstart: make it work end-to-end
+
+If you want the shortest path from clone to a working watchdog, follow this order:
+
+1. Put the **Home Assistant host on a Tuya smart plug**, but keep the **Raspberry Pi on separate power** so Sentinel stays alive when it power-cycles HA.
+2. In your router, give the **Home Assistant host** and the **Tuya plug** stable IP addresses or DHCP reservations.
+3. Pair the smart plug in the **Smart Life** or **Tuya Smart** mobile app.
+4. Get the Tuya values you need: `TUYA_DEVICE_ID`, `TUYA_DEVICE_IP`, `TUYA_LOCAL_KEY`, and usually `TUYA_VERSION`.
+5. Make sure the Home Assistant SSH add-on is reachable and capture its host key for `HA_SSH_HOST_KEY`.
+6. Copy `config.env.example` to `config.env` and fill in the real values.
+7. Deploy to the Pi with `./deploy_to_pi.sh <pi-host> [pi-user]`.
+8. Open the dashboard at `http://<pi-host>:8080` and verify both services stay healthy.
+
+### Minimum real-world prerequisites
+
+Before expecting automatic recovery to work, make sure all of these are true:
+
+- the Pi can stay powered while the HA host loses power
+- the HA machine is configured to **boot automatically after AC/power loss**
+- the Pi can reach Home Assistant on ports `8123` and `4357`
+- the Pi can reach the Tuya plug on the local network
+- SSH access to the HA add-on works non-interactively
+- you have at least one restoreable HA backup if you plan to use restore escalation
+
 ## Why this project is special
 
 Most watchdogs are simple: if a port stops responding, they reboot something.
@@ -305,6 +329,67 @@ The repository stores **no live secrets** in source files. Runtime values come f
 3. Keep `config.env` private
 4. Never commit it to Git
 
+### How to get the Tuya device info
+
+Sentinel needs these Tuya values:
+
+- `TUYA_DEVICE_ID`
+- `TUYA_DEVICE_IP`
+- `TUYA_LOCAL_KEY`
+- `TUYA_VERSION` (usually `3.4`, but confirm it)
+
+The most reliable path is to use **TinyTuya** on your laptop/desktop first, then copy the discovered values into `config.env`.
+
+#### Step 1: pair the plug in the Tuya/Smart Life app
+
+- Factory-reset the smart plug if needed
+- Pair it in **Smart Life** or **Tuya Smart**
+- Confirm you can turn the plug on/off from the app
+- If possible, create a DHCP reservation so the plug keeps the same IP
+
+#### Step 2: install TinyTuya on your computer
+
+- Run `python -m pip install tinytuya`
+
+#### Step 3: scan your LAN for the plug IP and device ID
+
+- Run `python -m tinytuya scan`
+- Look for your plug in the results
+- Note the discovered IP address and device ID
+- Also note the reported protocol version if it is shown
+
+#### Step 4: get the local key with the TinyTuya wizard
+
+TinyTuya's setup wizard pulls device metadata from the Tuya IoT Cloud and is the easiest standard way to obtain the **local key**.
+
+1. Create a developer account at `https://iot.tuya.com/`
+2. Create a cloud project in the correct Tuya data center/region
+3. In that project, enable the required APIs, especially **IoT Core** and **Authorization**
+4. Link your Smart Life / Tuya app account to the project so your paired devices appear there
+5. Run `python -m tinytuya wizard`
+6. When prompted, enter the Tuya API key, API secret, region, and a sample device ID
+7. Copy the matching device's `id` and `key` from the wizard output or generated `devices.json`
+
+For Sentinel, map them like this:
+
+- TinyTuya `id` -> `TUYA_DEVICE_ID`
+- TinyTuya `key` -> `TUYA_LOCAL_KEY`
+- scanned IP -> `TUYA_DEVICE_IP`
+- scanned/version result -> `TUYA_VERSION`
+
+#### Step 5: verify the plug details before using Sentinel
+
+If the plug was re-paired or reset, the local key may change. Re-run the TinyTuya wizard whenever the old key stops working.
+
+### How to get the Home Assistant SSH host key
+
+Sentinel uses SSH for investigation and restore logic, so pin the host key instead of trusting any SSH server blindly.
+
+1. Make sure the Home Assistant SSH add-on is installed and reachable
+2. From a trusted machine, run `ssh-keyscan -p 22 <HA_HOST>`
+3. Copy the resulting `ssh-ed25519 ...` or similar line into `HA_SSH_HOST_KEY`
+4. Test SSH manually once before deploying Sentinel
+
 ### Configuration reference
 
 | Variable | Required | Default | Purpose |
@@ -344,6 +429,37 @@ The repository stores **no live secrets** in source files. Runtime values come f
 ## Deployment
 
 The checked-in systemd service files are templates. The deployment script rewrites the install path and runtime user when deploying to the target Pi.
+
+### Full setup flow
+
+Use this checklist if you are setting up Sentinel from scratch.
+
+1. Prepare hardware
+   - Raspberry Pi stays powered independently
+   - Home Assistant host is plugged into the Tuya plug
+   - HA host is configured to boot after power loss
+2. Prepare network
+   - Pi, HA host, and Tuya plug are on the same reachable network
+   - HA host and plug preferably have reserved IPs
+3. Prepare Tuya access
+   - pair the plug in Smart Life / Tuya Smart
+   - collect `TUYA_DEVICE_ID`, `TUYA_DEVICE_IP`, `TUYA_LOCAL_KEY`, `TUYA_VERSION`
+4. Prepare Home Assistant access
+   - confirm the SSH add-on works
+   - set `HA_HOST`, `HA_SSH_USER`, `HA_SSH_PORT`, and `HA_SSH_HOST_KEY`
+5. Prepare restore inputs
+   - set `BACKUP_PASS`
+   - confirm your preferred backup location name if using `PREFERRED_RESTORE_LOCATION`
+6. Create local config
+   - copy `config.env.example` to `config.env`
+   - fill in all required values
+7. Deploy
+   - run `./deploy_to_pi.sh <pi-host> [pi-user]`
+   - default install path is `/home/<pi-user>/Documents/ha-watchdog`
+8. Verify first boot
+   - check `sudo systemctl status ha-watchdog.service ha-watchdog-status.service --no-pager`
+   - open `http://<pi-host>:8080`
+   - confirm the dashboard shows your real HA host / dashboard values instead of defaults
 
 ### Prerequisites
 
