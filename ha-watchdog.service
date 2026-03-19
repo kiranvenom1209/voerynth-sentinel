@@ -1,0 +1,18 @@
+[Unit]
+Description=Vœrynth Sentinel Watchdog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__WATCHDOG_USER__
+WorkingDirectory=__INSTALL_DIR__
+EnvironmentFile=-__INSTALL_DIR__/config.env
+ExecStart=/usr/bin/python3 __INSTALL_DIR__/ha_watchdog.py
+Restart=always
+RestartSec=10
+StandardOutput=append:__INSTALL_DIR__/logs/launchd_stdout.log
+StandardError=append:__INSTALL_DIR__/logs/launchd_stderr.log
+
+[Install]
+WantedBy=multi-user.target

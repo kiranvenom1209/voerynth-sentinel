@@ -1,0 +1,31 @@
+Vœrynth Proprietary Source License
+
+Copyright (c) 2026 Vœrynth.
+All rights reserved.
+
+This repository, including all source code, documentation, assets, and related materials,
+is proprietary and confidential. It is provided only for authorized internal use in
+connection with Vœrynth Sentinel and the broader Vœrynth OS project.
+
+Unless you have prior written permission from Vœrynth, you may not:
+
+1. use this repository for any external or public purpose;
+2. copy, reproduce, modify, adapt, translate, or create derivative works from it;
+3. distribute, publish, sublicense, sell, lease, lend, disclose, or otherwise make it
+   available to any third party;
+4. remove or alter copyright, attribution, confidentiality, or proprietary notices; or
+5. use any part of this repository to build or support a competing product or service.
+
+No patent, trademark, copyright, trade secret, or other intellectual property license is
+granted or implied except the limited right to access and use this repository internally
+when expressly authorized by Vœrynth.
+
+You are responsible for keeping all credentials, deployment artifacts, environment files,
+and generated logs out of public distribution.
+
+THE REPOSITORY IS PROVIDED "AS IS", WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+To request permission for any use outside authorized internal Vœrynth work, obtain prior
+written approval from the repository owner.
