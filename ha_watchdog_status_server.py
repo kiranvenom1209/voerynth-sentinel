@@ -3,7 +3,9 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import re
+import subprocess
 import threading
 import time
 from datetime import datetime
@@ -26,6 +28,8 @@ from runtime_config import (
     HARD_FAILURE_THRESHOLD,
     NABU_CASA_TIMEOUT,
     NABU_CASA_URL,
+    NETWORK_SANITY_CHECK_HOST,
+    NETWORK_SANITY_CHECK_TIMEOUT,
     PORT,
     POWER_OFF_SECONDS,
     REBOOT_WINDOW_SECONDS,
@@ -334,6 +338,8 @@ HTML = r'''<!doctype html>
       <div class="sb-item"><span>Relay</span><strong id="header-relay">—</strong></div>
       <div class="sb-sep"></div>
       <div class="sb-item"><span>Checked</span><strong id="header-checked">—</strong></div>
+      <div id="gateway-sep" class="sb-sep" style="display:none;"></div>
+      <div id="gateway-item" class="sb-item" style="display:none;"><span>Gateway</span><strong id="header-gateway">—</strong></div>
       <div class="sb-sep"></div>
       <div id="overall-badge" class="os-badge init"><span class="bd pulse"></span>&nbsp;<span id="header-overall">INIT</span></div>
     </div>
@@ -616,6 +622,26 @@ HTML = r'''<!doctype html>
           relayEl.innerHTML = `${d.plug.device_ip || '\u2014'} \u00b7 ${stateHtml}`;
         }
 
+        const gatewayItem = document.getElementById('gateway-item');
+        const gatewaySep = document.getElementById('gateway-sep');
+        const gatewayEl = document.getElementById('header-gateway');
+        if (gatewayItem) gatewayItem.style.display = d.network.enabled ? 'flex' : 'none';
+        if (gatewaySep) gatewaySep.style.display = d.network.enabled ? 'block' : 'none';
+        if (gatewayEl && d.network.enabled) {
+          const gatewayState = d.network.state;
+          const gatewayLabels = {
+            up: `${d.network.host} \u00b7 UP`,
+            down: `${d.network.host} \u00b7 DOWN`,
+            'probe-unavailable': `${d.network.host} \u00b7 PROBE`,
+          };
+          gatewayEl.textContent = gatewayLabels[gatewayState] || `${d.network.host || '\u2014'} \u00b7 \u2014`;
+          gatewayEl.style.color = gatewayState === 'up'
+            ? '#4ade80'
+            : gatewayState === 'probe-unavailable'
+              ? '#fbbf24'
+              : '#f87171';
+        }
+
         const verdictLabels = { ok: 'Node Healthy', warn: internetDown ? 'No Internet · Node Healthy' : 'Vœrynth Core Degraded', bad: 'Node Down' };
         setText('header-overall', verdictLabels[vkind]);
 
@@ -681,6 +707,7 @@ HTML = r'''<!doctype html>
           if (wf.in_boot_grace) bl.push('<span class="sbadge bg"><span class="dot"></span>BOOT GRACE</span>');
           if (sf.active)        bl.push('<span class="sbadge sf"><span class="dot"></span>SOFT FAILURE</span>');
           if (internetDown)     bl.push('<span class="sbadge ni"><span class="dot"></span>NO INTERNET</span>');
+          if (d.network.pause_enforcement) bl.push('<span class="sbadge ni"><span class="dot"></span>GATEWAY DOWN</span>');
           if (pol.dry_run)      bl.push('<span class="sbadge dr"><span class="dot"></span>DRY RUN</span>');
           stateBadges.innerHTML = bl.join('');
         }
@@ -817,6 +844,75 @@ def offline_remote_status():
         "status": None,
         "error": "Remote check disabled or not configured",
         "url": NABU_CASA_URL,
+    }
+
+
+def _build_ping_command(host: str, timeout: int):
+    safe_timeout = max(1, int(timeout))
+    if os.name == "nt":
+        return ["ping", "-n", "1", "-w", str(safe_timeout * 1000), host]
+    return ["ping", "-c", "1", "-W", str(safe_timeout), host]
+
+
+def network_sanity_check_host_reachable(
+    host: str = NETWORK_SANITY_CHECK_HOST,
+    timeout: int = NETWORK_SANITY_CHECK_TIMEOUT,
+):
+    normalized_host = (host or "").strip()
+    if not normalized_host:
+        return True, "disabled"
+
+    safe_timeout = max(1, int(timeout))
+    try:
+        result = subprocess.run(
+            _build_ping_command(normalized_host, safe_timeout),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=safe_timeout + 2,
+        )
+    except FileNotFoundError:
+        return True, "ping-unavailable"
+    except subprocess.TimeoutExpired:
+        return False, "ping-timeout"
+
+    if result.returncode == 0:
+        return True, "reachable"
+    return False, f"ping-exit-{result.returncode}"
+
+
+def disabled_network_status():
+    return {
+        "enabled": False,
+        "host": None,
+        "timeout": NETWORK_SANITY_CHECK_TIMEOUT,
+        "ok": None,
+        "state": "disabled",
+        "detail": "disabled",
+        "pause_enforcement": False,
+    }
+
+
+def get_network_status():
+    host = (NETWORK_SANITY_CHECK_HOST or "").strip()
+    if not host:
+        return disabled_network_status()
+
+    ok, detail = network_sanity_check_host_reachable(host, NETWORK_SANITY_CHECK_TIMEOUT)
+    state = "up"
+    if detail == "ping-unavailable":
+        state = "probe-unavailable"
+    elif not ok:
+        state = "down"
+
+    return {
+        "enabled": True,
+        "host": host,
+        "timeout": NETWORK_SANITY_CHECK_TIMEOUT,
+        "ok": ok,
+        "state": state,
+        "detail": detail,
+        "pause_enforcement": not ok,
     }
 
 
@@ -998,16 +1094,19 @@ class Handler(BaseHTTPRequestHandler):
     def build_payload(self):
         global _core_offline_since
         remote_check_enabled = ENABLE_REMOTE_CHECK and bool(NABU_CASA_URL)
+        network_check_enabled = bool((NETWORK_SANITY_CHECK_HOST or "").strip())
         # Run all network checks in parallel so a slow/dead internet connection
         # doesn't stall every check sequentially (was causing 16+ second hangs).
-        with ThreadPoolExecutor(max_workers=4 if remote_check_enabled else 3) as ex:
+        with ThreadPoolExecutor(max_workers=3 + int(remote_check_enabled) + int(network_check_enabled)) as ex:
             f_core     = ex.submit(check_url, HA_CORE_URL)
             f_observer = ex.submit(check_url, HA_OBSERVER_URL)
             f_remote   = ex.submit(check_url, NABU_CASA_URL, NABU_CASA_TIMEOUT) if remote_check_enabled else None
+            f_network  = ex.submit(get_network_status) if network_check_enabled else None
             f_plug     = ex.submit(get_plug_status)
             core     = f_core.result()
             observer = f_observer.result()
             remote   = f_remote.result() if f_remote else offline_remote_status()
+            network  = f_network.result() if f_network else disabled_network_status()
             plug     = f_plug.result()
         recent_lines = read_recent_logs(200)
         stats = parse_log_stats(recent_lines)
@@ -1050,6 +1149,7 @@ class Handler(BaseHTTPRequestHandler):
             "core": core,
             "observer": observer,
             "remote": remote,
+            "network": network,
             "plug": plug,
             "watchdog": {
                 "active": LOG_FILE.exists(),

@@ -166,6 +166,7 @@ Interpretation: the host may be frozen, networking may be broken, or the OS may 
 Behavior:
 
 - The watchdog increments a hard-failure counter.
+- If `NETWORK_SANITY_CHECK_HOST` is configured and the Pi cannot ping it, Sentinel pauses hard-recovery enforcement instead of treating the outage as proof the HA host is frozen.
 - Once `HARD_FAILURE_THRESHOLD` consecutive hard failures are seen, Sentinel attempts a power cycle.
 
 ### Intentional reboot/shutdown grace
@@ -395,6 +396,8 @@ Sentinel uses SSH for investigation and restore logic, so pin the host key inste
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `HA_HOST` | Yes | `homeassistant.local` | Hostname/IP of the protected Home Assistant machine |
+| `NETWORK_SANITY_CHECK_HOST` | No | empty | Optional pingable router/gateway IP used to detect whether the Pi itself is network-partitioned before hard-recovery escalation |
+| `NETWORK_SANITY_CHECK_TIMEOUT` | No | `1` | Ping timeout in seconds for `NETWORK_SANITY_CHECK_HOST` |
 | `HA_SSH_USER` | No | `ha` | SSH username for the Home Assistant SSH add-on |
 | `HA_SSH_PORT` | No | `22` | SSH port used for deep investigation and restore |
 | `HA_SSH_HOST_KEY` | Yes for SSH features | — | Pinned Home Assistant SSH server host key; accepts a full `known_hosts` line or `<key-type> <base64-key>` |
@@ -441,6 +444,7 @@ Use this checklist if you are setting up Sentinel from scratch.
 2. Prepare network
    - Pi, HA host, and Tuya plug are on the same reachable network
    - HA host and plug preferably have reserved IPs
+   - optionally set `NETWORK_SANITY_CHECK_HOST` to your router/gateway IP so Sentinel can pause enforcement during a Pi-side network outage
 3. Prepare Tuya access
    - pair the plug in Smart Life / Tuya Smart
    - collect `TUYA_DEVICE_ID`, `TUYA_DEVICE_IP`, `TUYA_LOCAL_KEY`, `TUYA_VERSION`

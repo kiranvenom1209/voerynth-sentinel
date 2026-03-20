@@ -131,6 +131,79 @@ class CoreOfflineRebootWindowTests(unittest.TestCase):
         )
 
 
+class NetworkSanityCheckTests(unittest.TestCase):
+    @patch("ha_watchdog.subprocess.run")
+    def test_network_sanity_check_host_reachable_returns_true_on_success(self, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+
+        ok, detail = ha_watchdog.network_sanity_check_host_reachable(
+            "192.168.2.1",
+            timeout=2,
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(detail, "reachable")
+        mock_run.assert_called_once()
+
+    @patch("ha_watchdog.subprocess.run")
+    def test_network_sanity_check_host_reachable_returns_false_on_ping_failure(self, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=1)
+
+        ok, detail = ha_watchdog.network_sanity_check_host_reachable(
+            "192.168.2.1",
+            timeout=1,
+        )
+
+        self.assertFalse(ok)
+        self.assertEqual(detail, "ping-exit-1")
+
+    @patch("ha_watchdog.time.sleep")
+    @patch("ha_watchdog.power_cycle_host")
+    @patch("ha_watchdog.should_pause_for_local_network_issue", return_value=True)
+    @patch("ha_watchdog.ha_observer_alive", return_value=(False, None, "observer down"))
+    @patch("ha_watchdog.get_core_state_via_ssh", return_value="unknown")
+    @patch("ha_watchdog.ha_core_alive", return_value=(False, None, "core down"))
+    def test_main_pauses_enforcement_when_gateway_is_unreachable(
+        self,
+        mock_core_alive,
+        mock_get_core_state,
+        mock_observer_alive,
+        mock_pause_network_issue,
+        mock_power_cycle,
+        mock_sleep,
+    ):
+        sleep_calls = []
+
+        def stop_after_loop(seconds):
+            sleep_calls.append(seconds)
+            if len(sleep_calls) >= 2:
+                ha_watchdog._running = False
+
+        mock_sleep.side_effect = stop_after_loop
+
+        with patch.object(ha_watchdog, "logger"), patch.object(
+            ha_watchdog,
+            "STARTUP_GRACE_PERIOD",
+            0,
+        ), patch.object(
+            ha_watchdog,
+            "NETWORK_SANITY_CHECK_HOST",
+            "192.168.2.1",
+        ), patch.object(ha_watchdog, "CHECK_INTERVAL", 5), patch.object(
+            ha_watchdog,
+            "_running",
+            True,
+        ):
+            ha_watchdog.main()
+
+        mock_core_alive.assert_called_once()
+        mock_get_core_state.assert_called_once()
+        mock_observer_alive.assert_called_once()
+        mock_pause_network_issue.assert_called_once()
+        mock_power_cycle.assert_not_called()
+        self.assertEqual(sleep_calls, [0, 5])
+
+
 class GetCoreStateViaSshTests(unittest.TestCase):
     @staticmethod
     def _exec_result(payload=None, stderr_text=""):

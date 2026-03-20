@@ -92,6 +92,8 @@ def _has_value(value) -> bool:
 HA_HOST = _env_str("HA_HOST", "homeassistant.local")
 HA_CORE_URL = f"http://{HA_HOST}:8123/api/"
 HA_OBSERVER_URL = f"http://{HA_HOST}:4357"
+NETWORK_SANITY_CHECK_HOST = _env_str("NETWORK_SANITY_CHECK_HOST")
+NETWORK_SANITY_CHECK_TIMEOUT = _env_int("NETWORK_SANITY_CHECK_TIMEOUT", 1)
 
 CHECK_INTERVAL = _env_int("CHECK_INTERVAL", 10)
 REQUEST_TIMEOUT = _env_int("REQUEST_TIMEOUT", 4)

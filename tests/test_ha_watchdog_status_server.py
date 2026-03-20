@@ -20,6 +20,7 @@ class OfflineDashboardAssetTests(unittest.TestCase):
         self.assertIn("/assets/fonts/kumbh-sans-400.ttf", html)
         self.assertIn("/assets/fonts/jetbrains-mono-500.ttf", html)
         self.assertIn("/assets/images/logo-gold-200.png", html)
+        self.assertIn('id="gateway-item"', html)
 
     def test_vendored_assets_exist_on_disk(self):
         expected_assets = [
@@ -89,6 +90,76 @@ class OfflineDashboardAssetTests(unittest.TestCase):
 
         self.assertEqual(mock_check_url.call_count, 2)
         self.assertFalse(payload["remote"]["enabled"])
+
+    def test_build_payload_exposes_gateway_status_when_network_probe_is_enabled(self):
+        handler = status_server.Handler.__new__(status_server.Handler)
+        stats = {
+            "consecutive_failures": 0,
+            "reboots_last_hour": 0,
+            "last_reboot_ts": None,
+            "in_cooldown": False,
+            "in_boot_grace": False,
+        }
+        fake_log_file = MagicMock()
+        fake_log_file.exists.return_value = False
+
+        with patch.object(status_server, "ENABLE_REMOTE_CHECK", False), \
+             patch.object(status_server, "NETWORK_SANITY_CHECK_HOST", "192.168.2.1"), \
+             patch.object(status_server, "get_network_status", return_value={
+                 "enabled": True,
+                 "host": "192.168.2.1",
+                 "timeout": 1,
+                 "ok": False,
+                 "state": "down",
+                 "detail": "ping-exit-1",
+                 "pause_enforcement": True,
+             }), \
+             patch.object(status_server, "check_url") as mock_check_url, \
+             patch.object(status_server, "get_plug_status", return_value={"ok": True, "relay_on": True}), \
+             patch.object(status_server, "read_recent_logs", return_value=[]), \
+             patch.object(status_server, "parse_log_stats", return_value=stats), \
+             patch.object(status_server, "LOG_FILE", fake_log_file):
+            mock_check_url.side_effect = [
+                {"ok": True, "status": 403, "error": None, "url": status_server.HA_CORE_URL},
+                {"ok": True, "status": 200, "error": None, "url": status_server.HA_OBSERVER_URL},
+            ]
+
+            payload = status_server.Handler.build_payload(handler)
+
+        self.assertTrue(payload["network"]["enabled"])
+        self.assertEqual(payload["network"]["host"], "192.168.2.1")
+        self.assertEqual(payload["network"]["state"], "down")
+        self.assertTrue(payload["network"]["pause_enforcement"])
+
+    def test_build_payload_disables_gateway_status_when_network_probe_is_not_configured(self):
+        handler = status_server.Handler.__new__(status_server.Handler)
+        stats = {
+            "consecutive_failures": 0,
+            "reboots_last_hour": 0,
+            "last_reboot_ts": None,
+            "in_cooldown": False,
+            "in_boot_grace": False,
+        }
+        fake_log_file = MagicMock()
+        fake_log_file.exists.return_value = False
+
+        with patch.object(status_server, "ENABLE_REMOTE_CHECK", False), \
+             patch.object(status_server, "NETWORK_SANITY_CHECK_HOST", ""), \
+             patch.object(status_server, "check_url") as mock_check_url, \
+             patch.object(status_server, "get_plug_status", return_value={"ok": True, "relay_on": True}), \
+             patch.object(status_server, "read_recent_logs", return_value=[]), \
+             patch.object(status_server, "parse_log_stats", return_value=stats), \
+             patch.object(status_server, "LOG_FILE", fake_log_file):
+            mock_check_url.side_effect = [
+                {"ok": True, "status": 403, "error": None, "url": status_server.HA_CORE_URL},
+                {"ok": True, "status": 200, "error": None, "url": status_server.HA_OBSERVER_URL},
+            ]
+
+            payload = status_server.Handler.build_payload(handler)
+
+        self.assertFalse(payload["network"]["enabled"])
+        self.assertEqual(payload["network"]["state"], "disabled")
+        self.assertFalse(payload["network"]["pause_enforcement"])
 
 
 class _RecordingLock:

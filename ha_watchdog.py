@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import json
+import os
 import shlex
 import signal
+import subprocess
 import time
 import logging
 from logging.handlers import RotatingFileHandler
@@ -29,6 +31,8 @@ from runtime_config import (
     HARD_FAILURE_THRESHOLD,
     INTENTIONAL_REBOOT_GRACE_PERIOD,
     MAX_REBOOTS_PER_HOUR,
+    NETWORK_SANITY_CHECK_HOST,
+    NETWORK_SANITY_CHECK_TIMEOUT,
     POST_RESTORE_BOOT_GRACE_PERIOD,
     POWER_OFF_SECONDS,
     PREFERRED_RESTORE_LOCATION,
@@ -140,6 +144,64 @@ def ha_observer_alive():
     if ok:
         return False, status, f"Unexpected Observer status {status}"
     return False, None, err
+
+def _build_ping_command(host: str, timeout: int):
+    safe_timeout = max(1, int(timeout))
+    if os.name == "nt":
+        return ["ping", "-n", "1", "-w", str(safe_timeout * 1000), host]
+    return ["ping", "-c", "1", "-W", str(safe_timeout), host]
+
+def network_sanity_check_host_reachable(
+    host: str = NETWORK_SANITY_CHECK_HOST,
+    timeout: int = NETWORK_SANITY_CHECK_TIMEOUT,
+):
+    normalized_host = (host or "").strip()
+    if not normalized_host:
+        return True, "disabled"
+
+    safe_timeout = max(1, int(timeout))
+    try:
+        result = subprocess.run(
+            _build_ping_command(normalized_host, safe_timeout),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=safe_timeout + 2,
+        )
+    except FileNotFoundError as exc:
+        logger.warning(
+            "Network sanity check host '%s' is configured but ping is unavailable (%s). "
+            "Proceeding with normal enforcement.",
+            normalized_host,
+            exc,
+        )
+        return True, "ping-unavailable"
+    except subprocess.TimeoutExpired:
+        return False, "ping-timeout"
+
+    if result.returncode == 0:
+        return True, "reachable"
+    return False, f"ping-exit-{result.returncode}"
+
+def should_pause_for_local_network_issue() -> bool:
+    normalized_host = NETWORK_SANITY_CHECK_HOST.strip()
+    if not normalized_host:
+        return False
+
+    network_ok, detail = network_sanity_check_host_reachable(
+        normalized_host,
+        NETWORK_SANITY_CHECK_TIMEOUT,
+    )
+    if network_ok:
+        return False
+
+    logger.warning(
+        "Local network sanity check failed: '%s' is unreachable (%s). Pausing hard "
+        "recovery enforcement because the Pi may be network-partitioned.",
+        normalized_host,
+        detail,
+    )
+    return True
 
 def _run_ha_cli_json_via_ssh(ssh, cli_command: str, description: str):
     """Execute a Home Assistant CLI command over SSH and parse its JSON output."""
@@ -627,6 +689,11 @@ def main():
         f"cooldown={COOLDOWN_AFTER_REBOOT}s, boot_grace={BOOT_GRACE_PERIOD}s, "
         f"plug_off={POWER_OFF_SECONDS}s"
     )
+    if NETWORK_SANITY_CHECK_HOST:
+        logger.info(
+            f"Network sanity check enabled: host={NETWORK_SANITY_CHECK_HOST}, "
+            f"timeout={NETWORK_SANITY_CHECK_TIMEOUT}s"
+        )
     if DRY_RUN:
         logger.warning("DRY RUN mode enabled — relay will NOT be switched")
     logger.info("=" * 60)
@@ -769,6 +836,12 @@ def main():
                 continue
 
             if reboot_window_action == "recover":
+                if should_pause_for_local_network_issue():
+                    hard_failures = 0
+                    soft_failures = 0
+                    soft_failure_start_ts = 0.0
+                    time.sleep(CHECK_INTERVAL)
+                    continue
                 logger.warning(
                     "Intentional reboot/shutdown grace active and Observer is now offline. "
                     "Initiating power-cycle immediately."
@@ -873,6 +946,12 @@ def main():
         if not trigger_recovery:
             # Hard failure: both Core and Observer are unreachable.
             # Machine is likely frozen — count toward the reboot threshold.
+            if should_pause_for_local_network_issue():
+                hard_failures = 0
+                soft_failures = 0
+                soft_failure_start_ts = 0.0
+                time.sleep(CHECK_INTERVAL)
+                continue
             hard_failures += 1
             soft_failures = 0
             soft_failure_start_ts = 0.0
